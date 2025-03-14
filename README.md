@@ -20,5 +20,5 @@ Let's assume your home router is acting as an NTP server and has ip-adress 192.1
 
 ```
 crontab -e
-* * * * * ntp-monitor.sh time.kpn.net 192.168.1.1
+* * * * * ntp-monitor.sh time.kpn.net 192.168.1.1 2>&1 | logger -t NTP-MONITOR
 ```
