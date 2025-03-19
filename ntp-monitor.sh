@@ -103,11 +103,12 @@ do
         rrd="${sn}.rrd"
         img="${sn}.png"
         if [ ! -r "$rrd" ]; then
-                rrdcreate "$rrd"
+                rrdcreate "$rrd" || \
+                        warn "rrdcreate for $rrd had no clean exit"
         fi
         if [ ! -r "$rrd" ]; then
                 warn "$rrd is not readable! Does it exist? Skipping"
-                return 1
+                continue
         fi
         ntp$MODE "$ip" "$rrd" "$img"
 done
