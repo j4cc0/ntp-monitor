@@ -33,67 +33,56 @@ rrdcreate() {
         DS:jitter:GAUGE:120:0:1 \
         RRA:AVERAGE:0.5:1:1440 \
         RRA:AVERAGE:0.5:10:1008
-        return 0
- }
+        return "$?"
+}
 
-ntpmonitor() {
+ntptrack() {
+        NTP_SERVER="$1"
+        RRD="$2"
+        COUNT=9
+        while [ $COUNT -ge 0 ]
+        do
+                #echo "Now running: ntpdate -quv ${NTP_SERVER} 2>/dev/null | awk '{print \$4 \" \" \$6}'"
+                #ntpdate -dquv ${NTP_SERVER} #| awk '{print $4 " " $6}'
+                OUT="$(/usr/sbin/ntpdate -quv ${NTP_SERVER} 2>/dev/null | /usr/bin/awk '{print $4 " " $6}')"
+                if [ "x${OUT}x" != "xx" ]; then
+                        break
+                fi
+                warn "$OUT - Invalid reply. Retrying $COUNT"
+                COUNT=$((COUNT - 1))
+                sleep 0.5
+        done
+        if [ $COUNT -le 0 ]; then
+                warn "No valid responses received. Skipping"
+                return 1
+        fi
+        OFF=$(echo $OUT | awk '{print $1}')
+        JIT=$(echo $OUT | awk '{print $2}')
+        echo "Updating $NTP_SERVER with OFFSET: $OFF and JITTER: $JIT"
+        rrdtool update "$RRD" "N:$OFF:$JIT" &>/dev/null
+        if [ "$?" -ne 0 ]; then
+                warn "Failed to update $RRD. Skipping"
+                return 1
+        fi
+        return 0
+}
+
+ntpgraph() {
         NTP_SERVER="$1"
         RRD="$2"
         IMG="${3:-${RRD}.png}"
-        if [ "x${RRD}x" = "xx" ]; then
-                warn "Missing filename. Skipping"
+        rrdtool graph "$IMG" \
+        --title "NTP Offset & Jitter $NTP_SERVER -- $(date '+%F %T')" \
+        --width 1280 --height 1024 \
+        --start -24h --end now \
+        DEF:offset="${RRD}":offset:AVERAGE \
+        DEF:jitter="${RRD}":jitter:AVERAGE \
+        LINE2:offset${COLOFF}:"Offset (sec)" \
+        LINE2:jitter${COLJIT}:"Jitter (sec)" &>/dev/null
+        if [ "$?" -ne 0 ]; then
+                warn "Failed to create $IMG"
                 return 1
         fi
-        if [ ! -r "$RRD" ]; then
-                rrdcreate "$RRD"
-        fi
-        if [ ! -r "$RRD" ]; then
-                warn "$RRD is not readable! Does it exist? Skipping"
-                return 1
-        fi
-        case "$MODE" in
-                track)
-                        COUNT=9
-                        while [ $COUNT -ge 0 ]
-                        do
-                                #echo "Now running: ntpdate -quv ${NTP_SERVER} 2>/dev/null | awk '{print \$4 \" \" \$6}'"
-                                #ntpdate -dquv ${NTP_SERVER} #| awk '{print $4 " " $6}'
-                                OUT="$(/usr/sbin/ntpdate -quv ${NTP_SERVER} 2>/dev/null | /usr/bin/awk '{print $4 " " $6}')"
-                                if [ "x${OUT}x" != "xx" ]; then
-                                        break
-                                fi
-                                warn "$OUT - Invalid reply. Retrying $COUNT"
-                                COUNT=$((COUNT - 1))
-                                sleep 0.5
-                        done
-                        if [ $COUNT -le 0 ]; then
-                                warn "No valid responses received. Skipping"
-                                return 1
-                        fi
-                        OFF=$(echo $OUT | awk '{print $1}')
-                        JIT=$(echo $OUT | awk '{print $2}')
-                        echo "Updating $NTP_SERVER with OFFSET: $OFF and JITTER: $JIT"
-                        rrdtool update "$RRD" "N:$OFF:$JIT" &>/dev/null
-                        if [ "$?" -ne 0 ]; then
-                                warn "Failed to update $RRD. Skipping"
-                                return 1
-                        fi
-                        ;;
-                graph)
-                        rrdtool graph "$IMG" \
-                        --title "NTP Offset & Jitter $NTP_SERVER -- $(date '+%F %T')" \
-                        --width 1280 --height 1024 \
-                        --start -24h --end now \
-                        DEF:offset="${RRD}":offset:AVERAGE \
-                        DEF:jitter="${RRD}":jitter:AVERAGE \
-                        LINE2:offset${COLOFF}:"Offset (sec)" \
-                        LINE2:jitter${COLJIT}:"Jitter (sec)" &>/dev/null
-                        if [ "$?" -ne 0 ]; then
-                                warn "Failed to create $IMG"
-                                return 1
-                        fi
-                        ;;
-        esac
         return 0
 }
 
@@ -113,6 +102,12 @@ do
         sn="$(echo $ip | sed 's/\./_/g')"
         rrd="${sn}.rrd"
         img="${sn}.png"
-        ntpmonitor "$ip" "$rrd" "$img"
+        if [ ! -r "$rrd" ]; then
+                rrdcreate "$rrd"
+        fi
+        if [ ! -r "$rrd" ]; then
+                warn "$rrd is not readable! Does it exist? Skipping"
+                return 1
+        fi
+        ntp$MODE "$ip" "$rrd" "$img"
 done
-
