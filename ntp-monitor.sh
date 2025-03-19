@@ -1,8 +1,10 @@
 #!/bin/bash
 # Descr: Very basic ntp-monitoring script
-# Usage: ntp-monitor.sh <ip-address> [ip-address] [...]
+# Usage: ntp-monitor.sh [track|graph] <ip-address> [ip-address] [...]
 # Author: Jacco van Buuren
+# License: BSD 3-clause
 
+MODE="track"
 RED="#FF0000"
 BLUE="#0000FF"
 
@@ -45,45 +47,66 @@ ntpmonitor() {
         if [ ! -r "$RRD" ]; then
                 rrdcreate "$RRD"
         fi
-        COUNT=9
-        while [ $COUNT -ge 0 ]
-        do
-                #echo "Now running: ntpdate -quv ${NTP_SERVER} 2>/dev/null | awk '{print \$4 \" \" \$6}'"
-                #ntpdate -dquv ${NTP_SERVER} #| awk '{print $4 " " $6}'
-                OUT="$(/usr/sbin/ntpdate -quv ${NTP_SERVER} 2>/dev/null | /usr/bin/awk '{print $4 " " $6}')"
-                if [ "x${OUT}x" != "xx" ]; then
-                        break
-                fi
-                warn "$OUT - Invalid reply. Retrying $COUNT"
-                COUNT=$((COUNT - 1))
-                sleep 0.5
-        done
-        if [ $COUNT -le 0 ]; then
-                warn "No valid responses received. Skipping"
+        if [ ! -r "$RRD" ]; then
+                warn "$RRD is not readable! Does it exist? Skipping"
                 return 1
         fi
-        OFF=$(echo $OUT | awk '{print $1}')
-        JIT=$(echo $OUT | awk '{print $2}')
-        echo "Updating $NTP_SERVER with OFFSET: $OFF and JITTER: $JIT"
-        rrdtool update "$RRD" "N:$OFF:$JIT" &>/dev/null
-        if [ "$?" -ne 0 ]; then
-                warn "Failed to update $RRD. Skipping"
-                return 1
-        fi
-        rrdtool graph "$IMG" \
-        --title "NTP Offset & Jitter" \
-        --width 800 --height 400 \
-        --start -24h --end now \
-        DEF:offset="${RRD}":offset:AVERAGE \
-        DEF:jitter="${RRD}":jitter:AVERAGE \
-        LINE2:offset${COLOFF}:"Offset (sec)" \
-        LINE2:jitter${COLJIT}:"Jitter (sec)" &>/dev/null
-        if [ "$?" -ne 0 ]; then
-                warn "Failed to create $IMG"
-                return 1
-        fi
+        case "$MODE" in
+                track)
+                        COUNT=9
+                        while [ $COUNT -ge 0 ]
+                        do
+                                #echo "Now running: ntpdate -quv ${NTP_SERVER} 2>/dev/null | awk '{print \$4 \" \" \$6}'"
+                                #ntpdate -dquv ${NTP_SERVER} #| awk '{print $4 " " $6}'
+                                OUT="$(/usr/sbin/ntpdate -quv ${NTP_SERVER} 2>/dev/null | /usr/bin/awk '{print $4 " " $6}')"
+                                if [ "x${OUT}x" != "xx" ]; then
+                                        break
+                                fi
+                                warn "$OUT - Invalid reply. Retrying $COUNT"
+                                COUNT=$((COUNT - 1))
+                                sleep 0.5
+                        done
+                        if [ $COUNT -le 0 ]; then
+                                warn "No valid responses received. Skipping"
+                                return 1
+                        fi
+                        OFF=$(echo $OUT | awk '{print $1}')
+                        JIT=$(echo $OUT | awk '{print $2}')
+                        echo "Updating $NTP_SERVER with OFFSET: $OFF and JITTER: $JIT"
+                        rrdtool update "$RRD" "N:$OFF:$JIT" &>/dev/null
+                        if [ "$?" -ne 0 ]; then
+                                warn "Failed to update $RRD. Skipping"
+                                return 1
+                        fi
+                        ;;
+                graph)
+                        rrdtool graph "$IMG" \
+                        --title "NTP Offset & Jitter $NTP_SERVER -- $(date '+%F %T')" \
+                        --width 1280 --height 1024 \
+                        --start -24h --end now \
+                        DEF:offset="${RRD}":offset:AVERAGE \
+                        DEF:jitter="${RRD}":jitter:AVERAGE \
+                        LINE2:offset${COLOFF}:"Offset (sec)" \
+                        LINE2:jitter${COLJIT}:"Jitter (sec)" &>/dev/null
+                        if [ "$?" -ne 0 ]; then
+                                warn "Failed to create $IMG"
+                                return 1
+                        fi
+                        ;;
+        esac
         return 0
 }
+
+case "$1" in
+        [Tt][Rr][Aa][Cc][Kk])
+                MODE="track"
+                shift
+                ;;
+        [Gg][Rr][Aa][Pp][Hh])
+                MODE="graph"
+                shift
+                ;;
+esac
 
 for ip in $@
 do
@@ -92,3 +115,4 @@ do
         img="${sn}.png"
         ntpmonitor "$ip" "$rrd" "$img"
 done
+
